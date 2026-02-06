@@ -1,0 +1,107 @@
+CREATE OR REPLACE TABLE `ascendant-epoch-480121-f9.Income_Tax_Rental.joined_clean` AS
+
+-- Step 0: Join raw tax table with median income table at the state level
+WITH Joined_Tax_Income AS (
+  SELECT
+    t.*,
+    i.MedianHouseholdIncomeInOnePersonHousehold_2023 AS median_income
+  FROM `ascendant-epoch-480121-f9.Income_Tax_Rental. Tax` AS t
+  LEFT JOIN `ascendant-epoch-480121-f9.Income_Tax_Rental.income_median` AS i
+    ON t.state = i.state
+),
+
+-- Step 1: Prepare the Personal Exemption field for parsing
+-- Convert to string, trim spaces, and remove symbols such as "$" and "," for regex extraction
+prep AS (
+  SELECT
+    j.*,
+    TRIM(CAST(j.`Personal Exemption` AS STRING)) AS pe_str,
+    REGEXP_REPLACE(LOWER(TRIM(CAST(j.`Personal Exemption` AS STRING))), r'[\$,]', '') AS pe_norm
+  FROM Joined_Tax_Income AS j
+),
+
+-- Step 2: Parse Personal Exemption into two separate concepts:
+--   (1) credit: tax credit applied AFTER tax is computed
+--   (2) personal_exemption_clean: deduction applied BEFORE tax calculation
+cleaned AS (
+  SELECT
+    p.*,
+    -- Extract numeric credit value if the field contains the word "credit"
+    COALESCE(
+      SAFE_CAST(REGEXP_EXTRACT(p.pe_norm, r'([0-9]+(?:\.[0-9]+)?)\s*credit') AS FLOAT64),
+      0
+    ) AS credit,
+
+    -- Otherwise, treat the value as a normal deduction (or 0 if missing / not applicable)
+    CASE
+      WHEN p.pe_str IS NULL OR p.pe_str IN ('', 'n.a.', 'na', 'n/a') THEN 0
+      WHEN p.pe_str LIKE '%credit%' THEN 0
+      ELSE COALESCE(
+        SAFE_CAST(REGEXP_EXTRACT(p.pe_norm, r'([0-9]+(?:\.[0-9]+)?)') AS FLOAT64),
+        0
+      )
+    END AS personal_exemption_clean
+  FROM prep AS p
+),
+
+-- Step 3: Collapse state-level attributes to "one row per state"
+-- ANY_VALUE is used because these values should be identical within each state
+-- (If inconsistencies exist, MAX/MIN or a custom rule could be applied instead.)
+cleaned_state AS (
+  SELECT
+    state,
+    ANY_VALUE(median_income) AS median_income,
+    ANY_VALUE(credit) AS credit,
+    ANY_VALUE(personal_exemption_clean) AS personal_exemption_clean
+  FROM cleaned
+  GROUP BY state
+),
+
+-- Step 4: Build a clean progressive tax bracket table
+-- 4.1 Extract lower bound and rate, and standardize numeric formats
+brackets_base AS (
+  SELECT
+    state,
+    SAFE_CAST(REGEXP_REPLACE(CAST(Brackets AS STRING), r'[, ]', '') AS FLOAT64) AS lower,
+    -- If Rates is stored as text like "2.00%", it should already be cleaned before this step
+    SAFE_CAST(CAST(Rates AS STRING) AS FLOAT64) AS rate
+  FROM `ascendant-epoch-480121-f9.Income_Tax_Rental. Tax`
+  WHERE Brackets IS NOT NULL
+),
+
+-- 4.2 Deduplicate brackets so that each (state, lower) pair appears only once
+brackets_dedup AS (
+  SELECT
+    state,
+    lower,
+    ANY_VALUE(rate) AS rate
+  FROM brackets_base
+  GROUP BY state, lower
+),
+
+-- 4.3 Generate upper bound for each bracket using LEAD()
+-- The top bracket will naturally have upper = NULL (open-ended)
+brackets_long AS (
+  SELECT
+    state,
+    lower,
+    LEAD(lower) OVER (PARTITION BY state ORDER BY lower) AS upper,
+    rate
+  FROM brackets_dedup
+)
+
+-- Step 5: Final output
+-- Combine state-level attributes with bracket-level structure
+-- Resulting table: one row per (state, bracket)
+SELECT
+  s.state,
+  s.median_income,
+  s.credit,
+  s.personal_exemption_clean,
+  b.rate,
+  b.lower,
+  b.upper
+FROM cleaned_state AS s
+JOIN brackets_long AS b
+  USING (state)
+ORDER BY state, lower;
