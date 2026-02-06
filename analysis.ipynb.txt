@@ -1,0 +1,88 @@
+# Set the working directory and import the CSV file.
+setwd("C:/Users/10298/Downloads")
+Income <- read.csv("Income_2024.csv")
+
+
+library(tidyverse)
+library(dplyr)
+library(stringr)
+
+library(ggplot2)
+
+  
+
+# Before creating the bar chart of income range distribution,
+# we improve label readability by shortening long x-axis labels
+# such as "$10,000 to $14,999".
+
+
+# Round values such as 14,999 up to the nearest thousand (15K)
+# to ensure consistent income interval boundaries.
+
+
+# 0) Clean labels: remove invisible spaces, trim, and normalize internal spacing
+Income <- Income %>%
+  mutate(Label..Grouping. = Label..Grouping. %>%
+           str_replace_all("\u00a0", " ") %>%
+           str_squish())
+
+# 1) Helper: convert to K
+to_K <- function(x) {
+  paste0(round(as.numeric(x) / 1000), "K")v
+  # Round values such as 14,999 up to the nearest thousand (15K)
+  # to keep interval boundaries consistent.
+}
+
+# 2) Only handle "x to y" ranges here
+label_to_interval <- function(label) {
+  lab <- label %>%
+    str_replace_all(",", "") %>%
+    str_squish()
+  
+  if (str_detect(lab, regex("\\$?\\d+\\s+to\\s+\\$?\\d+", ignore_case = TRUE))) {
+    nums <- str_extract_all(lab, "\\d+")[[1]]
+    lower <- to_K(nums[1])
+    upper <- to_K(nums[2])
+    return(paste0("[", lower, ",", upper, ")"))
+  }
+  
+  return(NA_character_)  # <- if no matching, return NA
+}
+
+# 3) Create Label_interval for range rows
+Income <- Income %>%
+  mutate(Label_interval = vapply(Label..Grouping., label_to_interval, character(1)))
+
+# 4) Overwrite the two special rows (exact match, now spacing is normalized)
+Income <- Income %>%
+  mutate(
+    Label_interval = case_when(
+      Label..Grouping. == "Less than $10,000"  ~ "[0,10K)",
+      Label..Grouping. == "$200,000 or more"  ~ "[200K, infinity)",
+      TRUE                                    ~ Label_interval
+    )
+  )
+
+
+# Create a dataset containing only income ranges
+# and their corresponding household percentages for visualization.
+Income_plot <- Income %>%
+  filter(str_detect(Label_interval, "\\[")) %>%
+  mutate(percent = as.numeric(str_remove(United.States..Households..Estimate, "\\%")))
+
+
+Income_plot <- Income_plot %>%
+  mutate(Label_interval = factor(Label_interval,
+                                 levels = unique(Label_interval)))
+
+
+ggplot(Income_plot, aes(x = Label_interval, y = percent)) +
+  geom_col(fill="steelblue") +
+  labs(
+    title = "US Household Income Distribution",
+    x = "Income Range",
+    y = "Percentage of Households"
+  ) +
+  scale_x_discrete(drop = FALSE) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
