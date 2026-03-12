@@ -13,7 +13,7 @@ net income after state taxes.
 
 ---
 
-### state_tax_brackets_2026.xlsx
+### 2026 Tax Brackets and Federal Income Tax Rates.csv
 State income tax bracket data obtained from the Tax Foundation.
 
 This dataset includes:
