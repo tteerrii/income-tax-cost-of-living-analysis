@@ -1,21 +1,23 @@
 # Data Folder
 
-This folder contains the datasets used in this project.
+This folder contains all datasets used in the project.
 
-## Structure
+The data is organized into two categories:
 
-- **raw/**  
-  Contains the original datasets downloaded from external sources.  
-  These files are not modified and serve as the starting point for data cleaning.
+## raw/
+Original datasets downloaded from external sources.
 
-- **processed/**  
-  Contains cleaned and merged datasets generated during the analysis.  
-  These datasets are produced by scripts in the `scripts/` folder and are used for visualization and analysis.
-
-## Data Sources
-
-The datasets include:
-- State income data
-- State tax bracket information (Tax Foundation)
-- Rental cost data
+These include:
+- State tax bracket data (Tax Foundation)
 - Grocery price data by state
+- Rental cost data by state
+
+## processed/
+Datasets generated during data cleaning and transformation.
+
+These include:
+- Cleaned state tax bracket dataset
+- Merged tax and income dataset
+- Final dataset used for cost-of-living analysis
+
+See the README files in each folder for more details about the datasets.
